@@ -21,6 +21,7 @@ with open(API_TOKEN_FILE, "r") as f:
 WG_MANAGER = "/usr/local/bin/awg-manager"
 WG_CONFIG = "/etc/amneziawg/awg0.conf"
 META_FILE = "/etc/amneziawg/clients_meta.json"
+GLOBAL_RESOURCES = "/etc/amneziawg/global_resources.txt"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,10 +39,12 @@ def verify_token(authorization: Optional[str] = Header(None)):
 class AddClientRequest(BaseModel):
     name: str
     duration_seconds: int = 0
-    resources: Optional[str] = ""  # список через запятую
 
 class DeleteClientRequest(BaseModel):
     name: str
+
+class AddResourceRequest(BaseModel):
+    resource: str
 
 def get_peer_names():
     peer_names = {}
@@ -70,10 +73,9 @@ def get_peer_names():
 async def add_client(request: AddClientRequest, auth: bool = Depends(verify_token)):
     name = request.name
     dur = request.duration_seconds
-    resources = request.resources or ""
-    logger.info(f"Add client {name}, duration {dur}, resources '{resources}'")
+    logger.info(f"Add client {name}, duration {dur}")
     try:
-        cmd = ["/usr/bin/sudo", WG_MANAGER, "add-temp" if dur > 0 else "add", name, str(dur) if dur > 0 else "", resources]
+        cmd = ["/usr/bin/sudo", WG_MANAGER, "add-temp" if dur > 0 else "add", name, str(dur) if dur > 0 else ""]
         env = os.environ.copy()
         env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
@@ -158,6 +160,46 @@ async def stats(auth: bool = Depends(verify_token)):
     except Exception as e:
         logger.exception(e)
         raise HTTPException(status_code=500, detail=str(e))
+
+# ----- Управление глобальными ресурсами -----
+@app.get("/global_resources")
+async def get_global_resources(auth: bool = Depends(verify_token)):
+    if not os.path.exists(GLOBAL_RESOURCES):
+        return {"resources": []}
+    with open(GLOBAL_RESOURCES, "r") as f:
+        resources = [line.strip() for line in f if line.strip()]
+    return {"resources": resources}
+
+@app.post("/add_global_resource")
+async def add_global_resource(request: AddResourceRequest, auth: bool = Depends(verify_token)):
+    resource = request.resource.strip()
+    if not resource:
+        raise HTTPException(status_code=400, detail="Empty resource")
+    # Проверяем, не существует ли уже
+    if os.path.exists(GLOBAL_RESOURCES):
+        with open(GLOBAL_RESOURCES, "r") as f:
+            existing = [line.strip() for line in f]
+        if resource in existing:
+            return {"status": "exists", "message": "Resource already exists"}
+    with open(GLOBAL_RESOURCES, "a") as f:
+        f.write(resource + "\n")
+    return {"status": "success", "message": f"Resource '{resource}' added"}
+
+@app.post("/delete_global_resource")
+async def delete_global_resource(request: AddResourceRequest, auth: bool = Depends(verify_token)):
+    resource = request.resource.strip()
+    if not resource:
+        raise HTTPException(status_code=400, detail="Empty resource")
+    if not os.path.exists(GLOBAL_RESOURCES):
+        raise HTTPException(status_code=404, detail="Resources file not found")
+    with open(GLOBAL_RESOURCES, "r") as f:
+        lines = f.readlines()
+    new_lines = [line for line in lines if line.strip() != resource]
+    if len(new_lines) == len(lines):
+        raise HTTPException(status_code=404, detail="Resource not found")
+    with open(GLOBAL_RESOURCES, "w") as f:
+        f.writelines(new_lines)
+    return {"status": "success", "message": f"Resource '{resource}' deleted"}
 
 @app.get("/health")
 async def health():
