@@ -45,7 +45,16 @@ def get_main_menu_keyboard():
         [InlineKeyboardButton("➕ Добавить клиента", callback_data="add_client")],
         [InlineKeyboardButton("❌ Удалить клиента", callback_data="del_client")],
         [InlineKeyboardButton("📋 Список клиентов", callback_data="list_clients")],
-        [InlineKeyboardButton("📊 Статистика", callback_data="stats")]
+        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
+        [InlineKeyboardButton("🌍 Управление ресурсами", callback_data="manage_resources")]
+    ])
+
+def get_resources_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Показать ресурсы", callback_data="show_resources")],
+        [InlineKeyboardButton("➕ Добавить ресурс", callback_data="add_resource")],
+        [InlineKeyboardButton("❌ Удалить ресурс", callback_data="del_resource")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back")]
     ])
 
 async def send_main_menu(chat_id, context, text="Главное меню:"):
@@ -108,7 +117,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("dur_"):
         seconds = int(data.split("_")[1])
         context.user_data['duration'] = seconds
-        # Запрос имени
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back")]]
         await query.edit_message_text("Введите имя клиента (латиница, 3-20 символов, - и _):", reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data['awaiting_name'] = True
@@ -127,14 +135,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 for name, info in clients.items():
                     expires = info.get("expires", 0)
                     ip = info.get("ip", "?")
-                    resources = info.get("resources", "")
                     if expires == 0:
                         expire_str = "♾️ постоянный"
                     else:
                         expire_str = f"до {datetime.fromtimestamp(expires).strftime('%Y-%m-%d %H:%M')}"
                     msg += f"• *{name}* — {expire_str} (IP: {ip})\n"
-                    if resources:
-                        msg += f"  Ресурсы: {resources}\n"
                 text = msg
             keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back")]]
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -151,6 +156,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
             await query.edit_message_text(f"Ошибка: {e}")
+    elif data == "manage_resources":
+        await query.edit_message_text("Управление глобальными ресурсами:", reply_markup=get_resources_menu_keyboard())
+    elif data == "show_resources":
+        try:
+            res = await call_api("global_resources")
+            resources = res.get("resources", [])
+            if resources:
+                text = "🌍 *Глобальные ресурсы (идут через VPN):*\n" + "\n".join(f"• {r}" for r in resources)
+            else:
+                text = "🌍 Список ресурсов пуст. Весь трафик идёт через VPN (0.0.0.0/0)."
+            keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="manage_resources")]]
+            await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await query.edit_message_text(f"Ошибка: {e}")
+    elif data == "add_resource":
+        context.user_data['awaiting_resource'] = True
+        keyboard = [[InlineKeyboardButton("◀️ Отмена", callback_data="manage_resources")]]
+        await query.edit_message_text("Введите IP-адрес, подсеть (например, 192.168.1.0/24) или домен для добавления:", reply_markup=InlineKeyboardMarkup(keyboard))
+    elif data == "del_resource":
+        # Сначала покажем список для удаления
+        try:
+            res = await call_api("global_resources")
+            resources = res.get("resources", [])
+            if not resources:
+                await query.edit_message_text("Список ресурсов пуст, нечего удалять.")
+                return
+            keyboard = []
+            for r in resources:
+                keyboard.append([InlineKeyboardButton(f"❌ {r}", callback_data=f"delres_{r}")])
+            keyboard.append([InlineKeyboardButton("◀️ Назад", callback_data="manage_resources")])
+            await query.edit_message_text("Выберите ресурс для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+        except Exception as e:
+            await query.edit_message_text(f"Ошибка: {e}")
+    elif data.startswith("delres_"):
+        resource = data[len("delres_"):]
+        try:
+            await call_api("delete_global_resource", {"resource": resource})
+            await query.edit_message_text(f"✅ Ресурс '{resource}' удалён.")
+            # Возврат в меню ресурсов
+            await query.message.reply_text("Управление ресурсами:", reply_markup=get_resources_menu_keyboard())
+        except Exception as e:
+            await query.edit_message_text(f"Ошибка при удалении: {e}")
     elif data == "back":
         await query.edit_message_text("Главное меню:", reply_markup=get_main_menu_keyboard())
 
@@ -166,27 +213,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not re.match(r'^[a-zA-Z0-9_-]{3,20}$', name):
             await update.message.reply_text("Некорректное имя. Попробуйте снова или нажмите Отмена.")
             return
-        context.user_data['name'] = name
-        # Теперь запрос ресурсов
-        keyboard = [[InlineKeyboardButton("◀️ Пропустить (все IP)", callback_data="skip_resources")]]
-        await update.message.reply_text(
-            "Введите IP-адреса или домены для туннелирования через запятую.\n"
-            "Например: 1.1.1.1, google.com, 8.8.8.8/32\n"
-            "Оставьте пустым и нажмите 'Пропустить' для полного туннеля.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        context.user_data['awaiting_resources'] = True
-        context.user_data['awaiting_name'] = False
-    elif context.user_data.get('awaiting_resources'):
-        resources = text if text else ""
         duration = context.user_data.get('duration', 0)
-        name = context.user_data.get('name', '')
         try:
-            res = await call_api("add_client", {
-                "name": name,
-                "duration_seconds": duration,
-                "resources": resources
-            })
+            res = await call_api("add_client", {"name": name, "duration_seconds": duration})
             conf_path = res.get("conf_path")
             png_path = res.get("png_path")
             if conf_path:
@@ -200,8 +229,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {e}")
             await send_main_menu(chat_id, context, "Произошла ошибка.")
-        context.user_data.pop('awaiting_resources', None)
-        context.user_data.pop('name', None)
+        context.user_data.pop('awaiting_name', None)
         context.user_data.pop('duration', None)
     elif context.user_data.get('awaiting_delete'):
         name = text
@@ -213,6 +241,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Ошибка: {e}")
             await send_main_menu(chat_id, context, "Произошла ошибка.")
         context.user_data['awaiting_delete'] = False
+    elif context.user_data.get('awaiting_resource'):
+        resource = text
+        try:
+            await call_api("add_global_resource", {"resource": resource})
+            await update.message.reply_text(f"✅ Ресурс '{resource}' добавлен в глобальный список.")
+            await update.message.reply_text("Управление ресурсами:", reply_markup=get_resources_menu_keyboard())
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {e}")
+        context.user_data.pop('awaiting_resource', None)
     else:
         await update.message.reply_text("Используйте /menu для управления.")
 
