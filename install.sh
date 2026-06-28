@@ -1,5 +1,5 @@
 #!/bin/bash
-# AmneziaWG + Telegram Bot Installer v5 (с виртуальным окружением)
+# AmneziaWG + Telegram Bot Installer v6 (с глобальным split tunneling)
 
 set -e
 
@@ -8,14 +8,14 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v5 ===${NC}"
+echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v6 ===${NC}"
 
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Пожалуйста, запустите скрипт с правами root (sudo).${NC}"
     exit 1
 fi
 
-# Проверка наличия .env, если нет — копируем из примера
+# Проверка наличия .env
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
@@ -25,7 +25,7 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Запрос переменных окружения (оставьте пустым для сохранения текущих)
+# Запрос переменных окружения
 echo -e "${YELLOW}Настройка переменных окружения (оставьте пустым для сохранения текущих)${NC}"
 read -p "Введите TELEGRAM_BOT_TOKEN: " token
 read -p "Введите ADMIN_IDS (Telegram ID, через запятую): " admins
@@ -49,7 +49,7 @@ export VPN_SUBNET=$subnet
 
 # Базовые пакеты (включая python3-full для venv)
 apt update
-apt install -y python3 python3-pip python3-venv python3-full curl wget jq qrencode iptables-persistent net-tools git
+apt install -y python3 python3-pip python3-venv python3-full curl wget jq qrencode iptables-persistent net-tools git dnsutils
 
 # ---------------------------------------------------------------------
 # Установка AmneziaWG (только если НЕ установлен)
@@ -76,12 +76,20 @@ else
 fi
 
 # ---------------------------------------------------------------------
-# Настройка бота и сервера (выполняется всегда, если awg есть)
+# Настройка бота и сервера
 # ---------------------------------------------------------------------
 echo -e "${GREEN}Настройка бота и сервера...${NC}"
 
 # Создание папок
 mkdir -p /etc/amneziawg /root/amneziawg-clients /opt/amneziawg-bot/app /opt/amneziawg-bot/scripts
+
+# +++ СОЗДАЁМ ГЛОБАЛЬНЫЙ ФАЙЛ РЕСУРСОВ, ЕСЛИ ОТСУТСТВУЕТ +++
+if [ ! -f /etc/amneziawg/global_resources.txt ]; then
+    touch /etc/amneziawg/global_resources.txt
+    echo -e "${GREEN}Файл глобальных ресурсов создан: /etc/amneziawg/global_resources.txt${NC}"
+else
+    echo -e "${GREEN}Файл глобальных ресурсов уже существует.${NC}"
+fi
 
 # Копирование файлов бота
 cp -r app/* /opt/amneziawg-bot/app/
@@ -147,7 +155,7 @@ if ! ip link show awg0 &>/dev/null; then
     /usr/bin/awg-quick up awg0
 fi
 
-# Обновление systemd-юнитов (с путями к venv)
+# Создание systemd-юнитов с путями к venv
 cat > /etc/systemd/system/awg-bot.service <<EOF
 [Unit]
 Description=AmneziaWG Telegram Bot
@@ -218,7 +226,8 @@ systemctl start awg-cleanup.timer
 if systemctl is-active --quiet awg-bot && systemctl is-active --quiet awg-api; then
     echo -e "${GREEN}=== Установка завершена успешно! ===${NC}"
     echo -e "Бот запущен. Используйте /menu в Telegram."
-    echo -e "При добавлении клиента вы сможете указать ресурсы (IP/домены) для туннелирования."
+    echo -e "Глобальный список ресурсов: /etc/amneziawg/global_resources.txt"
+    echo -e "Добавить ресурсы можно через бота: 🌍 Управление ресурсами"
 else
     echo -e "${YELLOW}Проверьте логи: journalctl -u awg-bot -f${NC}"
 fi
