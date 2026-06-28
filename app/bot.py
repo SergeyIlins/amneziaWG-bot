@@ -26,7 +26,7 @@ if os.path.exists(API_TOKEN_FILE):
     with open(API_TOKEN_FILE, "r") as f:
         API_TOKEN = f.read().strip()
 else:
-    raise FileNotFoundError(f"Файл {API_TOKEN_FILE} не найден. Запустите install.sh")
+    raise FileNotFoundError(f"Файл {API_TOKEN_FILE} не найден")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,17 +69,16 @@ async def call_api(endpoint: str, data: dict = None):
         return response.json()
 
 async def set_commands(app):
-    await app.bot.set_my_commands([BotCommand("menu", "Показать главное меню"), BotCommand("id", "Узнать свой Telegram ID")])
+    await app.bot.set_my_commands([BotCommand("menu", "Главное меню"), BotCommand("id", "Мой ID")])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
-        await update.message.reply_text("⛔ У вас нет доступа к этому боту.")
+        await update.message.reply_text("⛔ Доступ запрещён.")
         return
-    await update.message.reply_text("Добро пожаловать! Используйте /menu для управления AmneziaWG.")
+    await update.message.reply_text("Добро пожаловать! Используйте /menu.")
 
 async def show_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"Ваш Telegram ID: `{user_id}`", parse_mode="Markdown")
+    await update.message.reply_text(f"Ваш ID: `{update.effective_user.id}`", parse_mode="Markdown")
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update):
@@ -97,29 +96,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "add_client":
         keyboard = [
-            [InlineKeyboardButton("🕒 24 часа", callback_data="dur_86400")],
-            [InlineKeyboardButton("📅 1 месяц", callback_data="dur_2592000")],
-            [InlineKeyboardButton("📅 3 месяца", callback_data="dur_7776000")],
-            [InlineKeyboardButton("📅 6 месяцев", callback_data="dur_15552000")],
-            [InlineKeyboardButton("📅 12 месяцев", callback_data="dur_31104000")],
-            [InlineKeyboardButton("♾️ Постоянный", callback_data="dur_0")],
+            [InlineKeyboardButton("24 часа", callback_data="dur_86400")],
+            [InlineKeyboardButton("1 месяц", callback_data="dur_2592000")],
+            [InlineKeyboardButton("3 месяца", callback_data="dur_7776000")],
+            [InlineKeyboardButton("6 месяцев", callback_data="dur_15552000")],
+            [InlineKeyboardButton("12 месяцев", callback_data="dur_31104000")],
+            [InlineKeyboardButton("Постоянный", callback_data="dur_0")],
             [InlineKeyboardButton("◀️ Назад", callback_data="back")]
         ]
         await query.edit_message_text("Выберите срок:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif data.startswith("dur_"):
         seconds = int(data.split("_")[1])
         context.user_data['duration'] = seconds
-        for text, sec in DURATION_MAP.items():
-            if sec == seconds:
-                duration_text = text
-                break
-        else:
-            duration_text = f"{seconds} сек"
+        # Запрос имени
         keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back")]]
-        await query.edit_message_text(
-            f"Вы выбрали: {duration_text}\nТеперь введите имя клиента (латиница, 3-20 символов, можно - и _):",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("Введите имя клиента (латиница, 3-20 символов, - и _):", reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data['awaiting_name'] = True
     elif data == "del_client":
         context.user_data['awaiting_delete'] = True
@@ -132,16 +123,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not clients:
                 text = "Нет клиентов."
             else:
-                msg_lines = ["📋 *Список клиентов:*\n"]
+                msg = "📋 *Список клиентов:*\n"
                 for name, info in clients.items():
                     expires = info.get("expires", 0)
                     ip = info.get("ip", "?")
+                    resources = info.get("resources", "")
                     if expires == 0:
                         expire_str = "♾️ постоянный"
                     else:
-                        expire_str = f"⏰ до {datetime.fromtimestamp(expires).strftime('%Y-%m-%d %H:%M')}"
-                    msg_lines.append(f"• *{name}* — {expire_str} (IP: {ip})")
-                text = "\n".join(msg_lines)
+                        expire_str = f"до {datetime.fromtimestamp(expires).strftime('%Y-%m-%d %H:%M')}"
+                    msg += f"• *{name}* — {expire_str} (IP: {ip})\n"
+                    if resources:
+                        msg += f"  Ресурсы: {resources}\n"
+                text = msg
             keyboard = [[InlineKeyboardButton("◀️ Назад", callback_data="back")]]
             await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception as e:
@@ -170,13 +164,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('awaiting_name'):
         name = text
         if not re.match(r'^[a-zA-Z0-9_-]{3,20}$', name):
-            await update.message.reply_text("Некорректное имя. Разрешены буквы, цифры, - и _. Длина 3-20. Попробуйте снова.")
-            keyboard = [[InlineKeyboardButton("◀️ Отмена", callback_data="back")]]
-            await update.message.reply_text("Введите имя заново или нажмите 'Отмена':", reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("Некорректное имя. Попробуйте снова или нажмите Отмена.")
             return
+        context.user_data['name'] = name
+        # Теперь запрос ресурсов
+        keyboard = [[InlineKeyboardButton("◀️ Пропустить (все IP)", callback_data="skip_resources")]]
+        await update.message.reply_text(
+            "Введите IP-адреса или домены для туннелирования через запятую.\n"
+            "Например: 1.1.1.1, google.com, 8.8.8.8/32\n"
+            "Оставьте пустым и нажмите 'Пропустить' для полного туннеля.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        context.user_data['awaiting_resources'] = True
+        context.user_data['awaiting_name'] = False
+    elif context.user_data.get('awaiting_resources'):
+        resources = text if text else ""
         duration = context.user_data.get('duration', 0)
+        name = context.user_data.get('name', '')
         try:
-            res = await call_api("add_client", {"name": name, "duration_seconds": duration})
+            res = await call_api("add_client", {
+                "name": name,
+                "duration_seconds": duration,
+                "resources": resources
+            })
             conf_path = res.get("conf_path")
             png_path = res.get("png_path")
             if conf_path:
@@ -189,8 +199,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_main_menu(chat_id, context, "Что делаем дальше?")
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {e}")
-            await send_main_menu(chat_id, context, "Произошла ошибка. Главное меню:")
-        context.user_data['awaiting_name'] = False
+            await send_main_menu(chat_id, context, "Произошла ошибка.")
+        context.user_data.pop('awaiting_resources', None)
+        context.user_data.pop('name', None)
         context.user_data.pop('duration', None)
     elif context.user_data.get('awaiting_delete'):
         name = text
@@ -200,7 +211,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_main_menu(chat_id, context, "Что делаем дальше?")
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {e}")
-            await send_main_menu(chat_id, context, "Произошла ошибка. Главное меню:")
+            await send_main_menu(chat_id, context, "Произошла ошибка.")
         context.user_data['awaiting_delete'] = False
     else:
         await update.message.reply_text("Используйте /menu для управления.")
