@@ -38,6 +38,7 @@ def verify_token(authorization: Optional[str] = Header(None)):
 class AddClientRequest(BaseModel):
     name: str
     duration_seconds: int = 0
+    resources: Optional[str] = ""  # список через запятую
 
 class DeleteClientRequest(BaseModel):
     name: str
@@ -69,9 +70,10 @@ def get_peer_names():
 async def add_client(request: AddClientRequest, auth: bool = Depends(verify_token)):
     name = request.name
     dur = request.duration_seconds
-    logger.info(f"Add client {name}, duration {dur}")
+    resources = request.resources or ""
+    logger.info(f"Add client {name}, duration {dur}, resources '{resources}'")
     try:
-        cmd = ["/usr/bin/sudo", WG_MANAGER, "add-temp" if dur > 0 else "add", name, str(dur) if dur > 0 else ""]
+        cmd = ["/usr/bin/sudo", WG_MANAGER, "add-temp" if dur > 0 else "add", name, str(dur) if dur > 0 else "", resources]
         env = os.environ.copy()
         env['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
