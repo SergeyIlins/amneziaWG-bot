@@ -1,15 +1,45 @@
 #!/bin/bash
-# Управление клиентами AmneziaWG с поддержкой раздельного туннелирования
+# Управление клиентами AmneziaWG с глобальным списком ресурсов
 
 set -e
 
 SERVER_CONF="/etc/amneziawg/awg0.conf"
 META_FILE="/etc/amneziawg/clients_meta.json"
 CLIENTS_DIR="/root/amneziawg-clients"
+GLOBAL_RESOURCES="/etc/amneziawg/global_resources.txt"
 
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-"$(curl -s ifconfig.me)"}
 SERVER_PORT=${SERVER_PORT:-443}
 VPN_SUBNET=${VPN_SUBNET:-"10.0.0."}
+
+# Функция для получения глобального AllowedIPs
+get_global_allowed_ips() {
+    local allowed=""
+    if [ -f "$GLOBAL_RESOURCES" ] && [ -s "$GLOBAL_RESOURCES" ]; then
+        while IFS= read -r res; do
+            [ -z "$res" ] && continue
+            # Если ресурс похож на домен (содержит буквы и не является IP), разрешаем
+            if [[ ! "$res" =~ ^[0-9\./]+$ ]]; then
+                # Разрешаем домен в IP
+                ip_resolved=$(dig +short "$res" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+                if [ -n "$ip_resolved" ]; then
+                    allowed="${allowed}${ip_resolved}/32,"
+                else
+                    echo "Не удалось разрешить домен $res, пропускаем" >&2
+                fi
+            else
+                allowed="${allowed}${res},"
+            fi
+        done < "$GLOBAL_RESOURCES"
+        # Убираем последнюю запятую
+        allowed=${allowed%,}
+    fi
+    if [ -z "$allowed" ]; then
+        echo "0.0.0.0/0"
+    else
+        echo "$allowed"
+    fi
+}
 
 get_next_ip() {
     local last_ip=$(grep -oP "AllowedIPs = ${VPN_SUBNET}\K\d+" "$SERVER_CONF" | sort -n | tail -1)
@@ -23,7 +53,6 @@ get_next_ip() {
 add_client() {
     local name=$1
     local duration=$2
-    local resources=$3  # список IP/доменов через запятую (опционально)
     local ip=$(get_next_ip)
     if [ -z "$ip" ] || [ "$ip" -ge 255 ]; then
         echo "Нет свободных IP" >&2
@@ -33,33 +62,8 @@ add_client() {
     local public_key=$(echo "$private_key" | awg pubkey)
     local server_public_key=$(grep "^PrivateKey" "$SERVER_CONF" | awk '{print $3}' | awg pubkey 2>/dev/null || echo "")
 
-    # Формируем AllowedIPs
-    local allowed_ips=""
-    if [ -z "$resources" ]; then
-        allowed_ips="0.0.0.0/0"
-    else
-        # Преобразуем домены в IP (если нужно)
-        # Простейшая обработка: если ресурс содержит буквы, пытаемся разрешить через dig
-        # Но для простоты оставим как есть, клиент сам будет резолвить? Лучше разрешить на сервере.
-        # Для простоты будем считать, что пользователь вводит IP-адреса или подсети.
-        # Можно добавить вызов dig для каждого.
-        IFS=',' read -ra ADDR <<< "$resources"
-        for res in "${ADDR[@]}"; do
-            # Если содержит не цифры и точки, считаем доменом
-            if [[ ! "$res" =~ ^[0-9\./]+$ ]]; then
-                # Разрешаем домен в IP
-                ip_resolved=$(dig +short "$res" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-                if [ -n "$ip_resolved" ]; then
-                    allowed_ips="${allowed_ips}${ip_resolved}/32,"
-                else
-                    echo "Не удалось разрешить домен $res, пропускаем" >&2
-                fi
-            else
-                allowed_ips="${allowed_ips}${res},"
-            fi
-        done
-        allowed_ips=${allowed_ips%,}  # убираем последнюю запятую
-    fi
+    # Формируем AllowedIPs из глобального списка
+    local allowed_ips=$(get_global_allowed_ips)
 
     cat >> "$SERVER_CONF" <<EOF
 
@@ -90,6 +94,8 @@ EOF
     if [ "$duration" -gt 0 ]; then
         expires=$(date +%s -d "+$duration seconds")
     fi
+    # Сохраняем в метаданные также список ресурсов, которые были применены
+    local resources=$(cat "$GLOBAL_RESOURCES" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
     jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" --arg resources "$resources" '. + {($name): {"ip": $ip, "expires": $expires, "resources": $resources}}' "$META_FILE" > "${META_FILE}.tmp"
     mv "${META_FILE}.tmp" "$META_FILE"
     echo "Клиент $name добавлен. Конфиг: $client_conf, QR: ${CLIENTS_DIR}/${name}.png"
@@ -124,12 +130,12 @@ cleanup_expired() {
 
 case "$1" in
     add)
-        if [ -z "$2" ]; then echo "Использование: $0 add <имя> [duration_seconds] [resources]"; exit 1; fi
-        add_client "$2" "$3" "$4"
+        if [ -z "$2" ]; then echo "Использование: $0 add <имя> [duration_seconds]"; exit 1; fi
+        add_client "$2" "$3"
         ;;
     add-temp)
-        if [ -z "$2" ] || [ -z "$3" ]; then echo "Использование: $0 add-temp <имя> <seconds> [resources]"; exit 1; fi
-        add_client "$2" "$3" "$4"
+        if [ -z "$2" ] || [ -z "$3" ]; then echo "Использование: $0 add-temp <имя> <seconds>"; exit 1; fi
+        add_client "$2" "$3"
         ;;
     del)
         if [ -z "$2" ]; then echo "Использование: $0 del <имя>"; exit 1; fi
