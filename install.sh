@@ -1,5 +1,5 @@
 #!/bin/bash
-# AmneziaWG + Telegram Bot Installer v4 (с раздельным туннелированием)
+# AmneziaWG + Telegram Bot Installer v5 (с виртуальным окружением)
 
 set -e
 
@@ -8,7 +8,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v4 ===${NC}"
+echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v5 ===${NC}"
 
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Пожалуйста, запустите скрипт с правами root (sudo).${NC}"
@@ -47,9 +47,9 @@ export SERVER_PUBLIC_IP=$ip
 export SERVER_PORT=$port
 export VPN_SUBNET=$subnet
 
-# Базовые пакеты
+# Базовые пакеты (включая python3-full для venv)
 apt update
-apt install -y python3 python3-pip python3-venv curl wget jq qrencode iptables-persistent net-tools git
+apt install -y python3 python3-pip python3-venv python3-full curl wget jq qrencode iptables-persistent net-tools git
 
 # ---------------------------------------------------------------------
 # Установка AmneziaWG (только если НЕ установлен)
@@ -61,7 +61,6 @@ if [ ! -x /usr/bin/awg ]; then
         wget -O scripts/install_amneziawg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/v5.18.1/install_amneziawg.sh
     fi
     chmod +x scripts/install_amneziawg.sh
-    # Запускаем установщик с автоматическим согласием на перезагрузку
     yes | bash scripts/install_amneziawg.sh
     echo -e "${YELLOW}Установка AmneziaWG завершена. Требуется перезагрузка.${NC}"
     echo -e "${YELLOW}После перезагрузки запустите скрипт снова: sudo ./install.sh${NC}"
@@ -91,8 +90,11 @@ chmod +x /usr/local/bin/awg-manager
 cp .env /opt/amneziawg-bot/
 cp requirements.txt /opt/amneziawg-bot/
 
-# Установка Python-зависимостей
-pip3 install -r /opt/amneziawg-bot/requirements.txt
+# Создание виртуального окружения и установка зависимостей
+python3 -m venv /opt/amneziawg-bot/venv
+source /opt/amneziawg-bot/venv/bin/activate
+pip install -r /opt/amneziawg-bot/requirements.txt
+deactivate
 
 # Генерация конфига сервера, если отсутствует
 if [ ! -f /etc/amneziawg/awg0.conf ]; then
@@ -134,7 +136,7 @@ if ! iptables -t nat -C POSTROUTING -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null; 
     iptables-save > /etc/iptables/rules.v4
 fi
 
-# Открытие портов (если установлен ufw, иначе пропускаем)
+# Открытие портов (если установлен ufw)
 if command -v ufw &> /dev/null; then
     ufw allow $port/udp
     ufw allow 8000/tcp
@@ -145,9 +147,43 @@ if ! ip link show awg0 &>/dev/null; then
     /usr/bin/awg-quick up awg0
 fi
 
-# Копирование systemd-юнитов
-cp systemd/awg-bot.service /etc/systemd/system/
-cp systemd/awg-api.service /etc/systemd/system/
+# Обновление systemd-юнитов (с путями к venv)
+cat > /etc/systemd/system/awg-bot.service <<EOF
+[Unit]
+Description=AmneziaWG Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/amneziawg-bot
+EnvironmentFile=/opt/amneziawg-bot/.env
+ExecStart=/opt/amneziawg-bot/venv/bin/python3 /opt/amneziawg-bot/app/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/awg-api.service <<EOF
+[Unit]
+Description=AmneziaWG API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/amneziawg-bot
+EnvironmentFile=/opt/amneziawg-bot/.env
+ExecStart=/opt/amneziawg-bot/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 systemctl enable awg-bot awg-api
 systemctl restart awg-bot awg-api
