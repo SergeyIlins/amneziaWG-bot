@@ -1,5 +1,5 @@
 #!/bin/bash
-# Управление клиентами AmneziaWG (полный туннель)
+# Управление клиентами AmneziaWG (полный туннель) с перезапуском интерфейса
 
 set -e
 SERVER_CONF="/etc/amneziawg/awg0.conf"
@@ -22,15 +22,19 @@ add_client() {
     local private_key=$(awg genkey)
     local public_key=$(echo "$private_key" | awg pubkey)
     local server_public_key=$(grep "^PrivateKey" "$SERVER_CONF" | awk '{print $3}' | awg pubkey)
+
+    # Добавляем пира в конфиг (без комментариев, чтобы не мешали парсингу)
     cat >> "$SERVER_CONF" <<EOF
 
-# BEGIN_PEER $name
 [Peer]
 PublicKey = $public_key
 AllowedIPs = ${VPN_SUBNET}${ip}/32
-# END_PEER $name
 EOF
-    awg syncconf awg0 "$SERVER_CONF"
+
+    # Перезапускаем интерфейс, чтобы применить изменения (единственный надёжный способ)
+    awg-quick down awg0 2>/dev/null || true
+    awg-quick up awg0
+
     mkdir -p "$CLIENTS_DIR"
     cat > "${CLIENTS_DIR}/${name}.conf" <<EOF
 [Interface]
@@ -48,14 +52,22 @@ EOF
     qrencode -t png -o "${CLIENTS_DIR}/${name}.png" < "${CLIENTS_DIR}/${name}.conf"
     local expires=0
     [ "$duration" -gt 0 ] && expires=$(date +%s -d "+$duration seconds")
-    jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
+    # Обновляем мета-файл
+    if [ -f "$META_FILE" ]; then
+        jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
+    else
+        echo "{}" | jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' > "$META_FILE"
+    fi
     echo "Клиент $name добавлен. Конфиг: ${CLIENTS_DIR}/${name}.conf, QR: ${CLIENTS_DIR}/${name}.png"
 }
 
 del_client() {
     local name=$1
-    sed -i "/# BEGIN_PEER $name/,/# END_PEER $name/d" "$SERVER_CONF"
-    awg syncconf awg0 "$SERVER_CONF"
+    # Удаляем секцию пира из конфига (по имени, если используется # BEGIN_PEER)
+    sed -i "/# BEGIN_PEER $name/,/# END_PEER $name/d" "$SERVER_CONF" 2>/dev/null || true
+    # Перезапускаем интерфейс
+    awg-quick down awg0 2>/dev/null || true
+    awg-quick up awg0
     jq "del(.$name)" "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
     rm -f "${CLIENTS_DIR}/${name}.conf" "${CLIENTS_DIR}/${name}.png"
     echo "Клиент $name удалён."
