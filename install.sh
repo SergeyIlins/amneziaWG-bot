@@ -1,40 +1,25 @@
 #!/bin/bash
-# AmneziaWG + Telegram Bot Installer v7 — финальный
+# AmneziaWG + Telegram Bot Installer (упрощённый)
 
 set -e
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v7 ===${NC}"
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer (Simple) ===${NC}"
 
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}Пожалуйста, запустите скрипт с правами root (sudo).${NC}"
+    echo -e "${RED}Запустите с правами root (sudo).${NC}"
     exit 1
 fi
 
 # .env
-if [ ! -f ".env" ]; then
-    if [ -f ".env.example" ]; then
-        cp .env.example .env
-    else
-        echo -e "${RED}Файл .env.example отсутствует.${NC}"
-        exit 1
-    fi
-fi
+if [ ! -f ".env" ]; then cp .env.example .env; fi
 
 # Запрос переменных
-echo -e "${YELLOW}Настройка переменных окружения (оставьте пустым для сохранения текущих)${NC}"
-read -p "Введите TELEGRAM_BOT_TOKEN: " token
-read -p "Введите ADMIN_IDS (Telegram ID, через запятую): " admins
-read -p "Введите SERVER_PUBLIC_IP (автоопределение): " ip
-ip=${ip:-$(curl -s ifconfig.me)}
-read -p "Введите SERVER_PORT (по умолчанию 443): " port
-port=${port:-443}
-read -p "Введите VPN_SUBNET (по умолчанию 10.9.9.): " subnet
-subnet=${subnet:-10.9.9.}
+echo -e "${YELLOW}Настройка переменных (оставьте пустым для сохранения)${NC}"
+read -p "TELEGRAM_BOT_TOKEN: " token
+read -p "ADMIN_IDS: " admins
+read -p "SERVER_PUBLIC_IP (авто): " ip; ip=${ip:-$(curl -s ifconfig.me)}
+read -p "SERVER_PORT (по умолчанию 443): " port; port=${port:-443}
+read -p "VPN_SUBNET (по умолчанию 10.9.9.): " subnet; subnet=${subnet:-10.9.9.}
 
 [ -n "$token" ] && sed -i "s/^TELEGRAM_BOT_TOKEN=.*/TELEGRAM_BOT_TOKEN=$token/" .env
 [ -n "$admins" ] && sed -i "s/^ADMIN_IDS=.*/ADMIN_IDS=$admins/" .env
@@ -42,48 +27,31 @@ subnet=${subnet:-10.9.9.}
 [ -n "$port" ] && sed -i "s/^SERVER_PORT=.*/SERVER_PORT=$port/" .env
 [ -n "$subnet" ] && sed -i "s/^VPN_SUBNET=.*/VPN_SUBNET=$subnet/" .env
 
-export SERVER_PUBLIC_IP=$ip
-export SERVER_PORT=$port
-export VPN_SUBNET=$subnet
+export SERVER_PUBLIC_IP=$ip SERVER_PORT=$port VPN_SUBNET=$subnet
 
-# Пакеты
+# Базовые пакеты
 apt update
 apt install -y python3 python3-pip python3-venv python3-full curl wget jq qrencode iptables-persistent net-tools git dnsutils
 
-# AmneziaWG
+# Установка AmneziaWG (если нет)
 if [ ! -x /usr/bin/awg ]; then
-    echo -e "${YELLOW}AmneziaWG не найден. Запуск установщика bivlked...${NC}"
+    echo -e "${YELLOW}Установка AmneziaWG...${NC}"
     mkdir -p scripts
-    if [ ! -f "scripts/install_amneziawg.sh" ]; then
-        wget -O scripts/install_amneziawg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/v5.18.1/install_amneziawg.sh
-    fi
+    wget -O scripts/install_amneziawg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/v5.18.1/install_amneziawg.sh
     chmod +x scripts/install_amneziawg.sh
     yes | bash scripts/install_amneziawg.sh
-    echo -e "${YELLOW}Установка AmneziaWG завершена. Требуется перезагрузка.${NC}"
-    echo -e "${YELLOW}После перезагрузки запустите скрипт снова: sudo ./install.sh${NC}"
-    echo -e "${YELLOW}Перезагрузить сейчас? (y/N)${NC}"
+    echo -e "${YELLOW}Требуется перезагрузка. Перезагрузиться? (y/N)${NC}"
     read -r reboot_now
-    if [[ "$reboot_now" =~ ^[Yy]$ ]]; then
-        reboot
-    else
-        exit 0
-    fi
+    if [[ "$reboot_now" =~ ^[Yy]$ ]]; then reboot; else exit 0; fi
 else
-    echo -e "${GREEN}AmneziaWG уже установлен (найден /usr/bin/awg).${NC}"
+    echo -e "${GREEN}AmneziaWG уже установлен.${NC}"
 fi
 
-# --- Настройка ---
-echo -e "${GREEN}Настройка бота и сервера...${NC}"
-
+# --- Настройка бота ---
+echo -e "${GREEN}Настройка бота...${NC}"
 mkdir -p /etc/amneziawg /root/amneziawg-clients /opt/amneziawg-bot/app /opt/amneziawg-bot/scripts
 
-# Глобальный файл ресурсов
-if [ ! -f /etc/amneziawg/global_resources.txt ]; then
-    touch /etc/amneziawg/global_resources.txt
-    echo -e "${GREEN}Создан /etc/amneziawg/global_resources.txt${NC}"
-fi
-
-# Копирование бота и скриптов
+# Копирование
 cp -r app/* /opt/amneziawg-bot/app/
 cp scripts/awg-manager.sh /usr/local/bin/awg-manager
 chmod +x /usr/local/bin/awg-manager
@@ -96,10 +64,9 @@ source /opt/amneziawg-bot/venv/bin/activate
 pip install -r /opt/amneziawg-bot/requirements.txt
 deactivate
 
-# Конфиг сервера (с правильным синтаксисом)
+# Конфиг сервера (с правильной подсетью)
 if [ ! -f /etc/amneziawg/awg0.conf ]; then
     SERVER_PRIV=$(/usr/bin/awg genkey)
-    SERVER_PUB=$(echo "$SERVER_PRIV" | /usr/bin/awg pubkey)
     cat > /etc/amneziawg/awg0.conf <<EOF
 [Interface]
 PrivateKey = $SERVER_PRIV
@@ -114,39 +81,31 @@ S2 = 89
 H1 = 9784561
 H2 = 5421786
 EOF
-    echo -e "${GREEN}Конфиг сервера создан.${NC}"
-else
-    echo -e "${GREEN}Конфиг сервера уже существует.${NC}"
 fi
 
-# Форвардинг
+# Форвардинг и NAT
 sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-
-# NAT и firewall
 DEFAULT_IF=$(ip route | grep default | awk '{print $5}')
-if [ -n "$DEFAULT_IF" ]; then
-    iptables -t nat -A POSTROUTING -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || true
-    iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true
-    iptables -A FORWARD -o awg0 -j ACCEPT 2>/dev/null || true
-    iptables-save > /etc/iptables/rules.v4
-fi
+iptables -t nat -A POSTROUTING -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || true
+iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true
+iptables -A FORWARD -o awg0 -j ACCEPT 2>/dev/null || true
+iptables-save > /etc/iptables/rules.v4
 if command -v ufw &> /dev/null; then
     ufw allow $port/udp
     ufw allow 8000/tcp
 fi
 
-# Поднятие интерфейса (если не поднят)
+# Поднятие интерфейса
 if ! ip link show awg0 &>/dev/null; then
     /usr/bin/awg-quick up awg0
 fi
 
-# Systemd
+# Systemd юниты
 cat > /etc/systemd/system/awg-bot.service <<EOF
 [Unit]
-Description=AmneziaWG Telegram Bot
+Description=AmneziaWG Bot
 After=network.target
-
 [Service]
 Type=simple
 User=root
@@ -155,7 +114,6 @@ EnvironmentFile=/opt/amneziawg-bot/.env
 ExecStart=/opt/amneziawg-bot/venv/bin/python3 /opt/amneziawg-bot/app/bot.py
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -164,7 +122,6 @@ cat > /etc/systemd/system/awg-api.service <<EOF
 [Unit]
 Description=AmneziaWG API
 After=network.target
-
 [Service]
 Type=simple
 User=root
@@ -173,7 +130,6 @@ EnvironmentFile=/opt/amneziawg-bot/.env
 ExecStart=/opt/amneziawg-bot/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -185,29 +141,23 @@ systemctl restart awg-bot awg-api
 # Таймер очистки
 cat > /etc/systemd/system/awg-cleanup.service <<EOF
 [Unit]
-Description=AmneziaWG Cleanup Expired Clients
+Description=Cleanup Expired Clients
 After=network.target
-
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/awg-manager cleanup
 EOF
-
 cat > /etc/systemd/system/awg-cleanup.timer <<EOF
 [Unit]
 Description=Run cleanup daily
 Requires=awg-cleanup.service
-
 [Timer]
 OnCalendar=daily
 Persistent=true
-
 [Install]
 WantedBy=timers.target
 EOF
 systemctl enable awg-cleanup.timer
 systemctl start awg-cleanup.timer
 
-echo -e "${GREEN}=== Установка завершена успешно! ===${NC}"
-echo -e "Бот запущен. Используйте /menu в Telegram."
-echo -e "Глобальный список ресурсов: /etc/amneziawg/global_resources.txt"
+echo -e "${GREEN}Установка завершена! Бот запущен. Используйте /menu в Telegram.${NC}"
