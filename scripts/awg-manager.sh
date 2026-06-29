@@ -1,13 +1,42 @@
 #!/bin/bash
-# Управление клиентами AmneziaWG (полный туннель) с перезапуском интерфейса
+# Управление клиентами AmneziaWG — копирует все параметры обфускации с сервера
 
 set -e
-SERVER_CONF="/etc/amneziawg/awg0.conf"
+SERVER_CONF="/etc/amnezia/amneziawg/awg0.conf"
 META_FILE="/etc/amneziawg/clients_meta.json"
 CLIENTS_DIR="/root/amneziawg-clients"
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-"$(curl -s ifconfig.me)"}
-SERVER_PORT=${SERVER_PORT:-443}
+SERVER_PORT=${SERVER_PORT:-587}
 VPN_SUBNET=${VPN_SUBNET:-"10.9.9."}
+
+# Функция: читает все параметры обфускации из серверного конфига
+get_obfuscation_params() {
+    local conf="$1"
+    local in_interface=0
+    local params=""
+    while IFS= read -r line; do
+        # Ищем начало секции [Interface]
+        if [[ "$line" =~ ^\[Interface\] ]]; then
+            in_interface=1
+            continue
+        fi
+        # Если встретили другую секцию — выходим
+        if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then
+            break
+        fi
+        # Если внутри секции Interface
+        if [ $in_interface -eq 1 ]; then
+            # Пропускаем строки с PrivateKey, Address, ListenPort
+            if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort) ]]; then
+                # Добавляем непустые строки
+                if [ -n "$line" ]; then
+                    params="$params$line\n"
+                fi
+            fi
+        fi
+    done < "$conf"
+    echo -e "$params"
+}
 
 get_next_ip() {
     local last_ip=$(grep -oP "AllowedIPs = ${VPN_SUBNET}\K\d+" "$SERVER_CONF" | sort -n | tail -1)
@@ -23,7 +52,7 @@ add_client() {
     local public_key=$(echo "$private_key" | awg pubkey)
     local server_public_key=$(grep "^PrivateKey" "$SERVER_CONF" | awk '{print $3}' | awg pubkey)
 
-    # Добавляем пира в конфиг (без комментариев, чтобы не мешали парсингу)
+    # Добавляем пира в серверный конфиг
     cat >> "$SERVER_CONF" <<EOF
 
 [Peer]
@@ -31,9 +60,12 @@ PublicKey = $public_key
 AllowedIPs = ${VPN_SUBNET}${ip}/32
 EOF
 
-    # Перезапускаем интерфейс, чтобы применить изменения (единственный надёжный способ)
+    # Перезапускаем интерфейс для применения изменений
     awg-quick down awg0 2>/dev/null || true
     awg-quick up awg0
+
+    # Получаем все параметры обфускации с сервера
+    obf_params=$(get_obfuscation_params "$SERVER_CONF")
 
     mkdir -p "$CLIENTS_DIR"
     cat > "${CLIENTS_DIR}/${name}.conf" <<EOF
@@ -41,7 +73,7 @@ EOF
 PrivateKey = $private_key
 Address = ${VPN_SUBNET}${ip}/32
 DNS = 8.8.8.8, 1.1.1.1
-MTU = 1280
+$obf_params
 
 [Peer]
 PublicKey = $server_public_key
@@ -49,10 +81,10 @@ Endpoint = ${SERVER_PUBLIC_IP}:${SERVER_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
+
     qrencode -t png -o "${CLIENTS_DIR}/${name}.png" < "${CLIENTS_DIR}/${name}.conf"
     local expires=0
     [ "$duration" -gt 0 ] && expires=$(date +%s -d "+$duration seconds")
-    # Обновляем мета-файл
     if [ -f "$META_FILE" ]; then
         jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
     else
@@ -63,9 +95,7 @@ EOF
 
 del_client() {
     local name=$1
-    # Удаляем секцию пира из конфига (по имени, если используется # BEGIN_PEER)
     sed -i "/# BEGIN_PEER $name/,/# END_PEER $name/d" "$SERVER_CONF" 2>/dev/null || true
-    # Перезапускаем интерфейс
     awg-quick down awg0 2>/dev/null || true
     awg-quick up awg0
     jq "del(.$name)" "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
