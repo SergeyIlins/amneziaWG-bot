@@ -1,6 +1,7 @@
+markdown
 # AmneziaWG Telegram Bot
 
-Управление VPN-сервером AmneziaWG через Telegram-бота.
+Управление VPN-сервером AmneziaWG через Telegram-бота.  
 Установка в одну команду, полная автоматизация, обфускация трафика для обхода блокировок.
 
 ## ✨ Возможности
@@ -28,3 +29,100 @@
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y git curl wget
+Шаг 2. Клонирование репозитория
+bash
+git clone https://github.com/SergeyIlins/amneziaWG-bot.git
+cd amneziaWG-bot
+Шаг 3. Настройка переменных окружения
+bash
+cp .env.example .env
+nano .env
+Вставьте свои данные:
+
+text
+TELEGRAM_BOT_TOKEN=ваш_токен_от_BotFather
+ADMIN_IDS=ваш_telegram_id
+SERVER_PUBLIC_IP= (оставьте пустым — определится автоматически)
+SERVER_PORT=587
+VPN_SUBNET=10.9.9.
+Сохраните: Ctrl+O, Enter, Ctrl+X.
+
+Шаг 4. Запуск установки
+bash
+chmod +x install.sh
+sudo ./install.sh
+Что происходит во время установки:
+
+Устанавливаются базовые пакеты.
+
+Если AmneziaWG не найден — скачивается и запускается установщик bivlked.
+
+Установщик запросит:
+
+Порт: введите 587 и нажмите Enter.
+
+Режим маршрутизации: выберите 2 (Amnezia+DNS).
+
+После завершения установки AmneziaWG скрипт предложит перезагрузиться — введите y.
+
+Шаг 5. Донастройка после перезагрузки
+После перезагрузки снова подключитесь по SSH и выполните:
+
+bash
+cd ~/amneziaWG-bot
+sudo ./install.sh
+Скрипт пропустит установку AmneziaWG (так как он уже найден) и настроит бота, API, сервисы.
+
+Шаг 6. Проверка работоспособности
+bash
+systemctl status awg-bot awg-api
+sudo awg show
+Если сервисы активны и интерфейс awg0 поднят — всё работает.
+
+Шаг 7. Тестирование в Telegram
+Откройте Telegram, найдите бота.
+
+Отправьте /menu.
+
+Нажмите ➕ Добавить клиента, выберите срок, введите имя (например, test).
+
+Бот пришлёт .conf и QR-код.
+
+📱 Использование бота
+/menu — главное меню.
+
+➕ Добавить клиента — выберите срок, введите имя; бот пришлёт .conf и QR.
+
+❌ Удалить клиента — введите имя для удаления.
+
+📋 Список клиентов — показывает всех клиентов с IP и датой истечения.
+
+📊 Статистика — показывает активные пиры и трафик.
+
+🔧 Управление сервером
+bash
+# Статус сервисов
+systemctl status awg-bot awg-api
+
+# Перезапуск бота и API
+sudo systemctl restart awg-bot awg-api
+
+# Логи бота
+sudo journalctl -u awg-bot -f
+
+# Логи API
+sudo journalctl -u awg-api -f
+
+# Статус интерфейса
+sudo awg show
+
+# Смена параметров обфускации (вручную)
+sudo nano /etc/amnezia/amneziawg/awg0.conf   # измените Jc, Jmin, ... I1
+sudo awg-quick down awg0 && sudo awg-quick up awg0
+🧪 Тестирование и отладка
+1. Проверка доступа к интернету через VPN
+Импортируйте полученный конфиг в клиент Amnezia VPN (скачайте с amnezia.org).
+
+Подключитесь и откройте в браузере 2ip.ru — должен отображаться IP вашего сервера.
+
+Проверьте доступ к Telegram и YouTube.
