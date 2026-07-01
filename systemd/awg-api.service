@@ -7,7 +7,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/amneziawg-bot
 EnvironmentFile=/opt/amneziawg-bot/.env
-ExecStart=/usr/local/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+ExecStart=/opt/amneziawg-bot/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
 
