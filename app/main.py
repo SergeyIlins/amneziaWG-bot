@@ -19,7 +19,7 @@ with open(API_TOKEN_FILE, "r") as f:
     API_TOKEN = f.read().strip()
 
 WG_MANAGER = "/usr/local/bin/awg-manager"
-WG_CONFIG = "/etc/amneziawg/awg0.conf"
+WG_CONFIG = "/etc/amnezia/amneziawg/awg0.conf"
 META_FILE = "/etc/amneziawg/clients_meta.json"
 
 logging.basicConfig(level=logging.INFO)
@@ -81,11 +81,10 @@ async def add_client(request: AddClientRequest, auth: bool = Depends(verify_toke
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=result.stderr)
         time.sleep(0.5)
-        # Проверяем оба возможных пути
         conf_path = f"/root/amneziawg-clients/{name}.conf"
         png_path = f"/root/amneziawg-clients/{name}.png"
         if not os.path.exists(conf_path):
-            # Возможно, создался в /root/
+            # Fallback to /root/
             alt_conf = f"/root/{name}.conf"
             if os.path.exists(alt_conf):
                 conf_path = alt_conf
