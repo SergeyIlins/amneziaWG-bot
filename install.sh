@@ -1,5 +1,5 @@
 #!/bin/bash
-# AmneziaWG + Telegram Bot Installer v8 — полная автоматизация с автотестированием
+# AmneziaWG + Telegram Bot Installer v10 — финальная версия
 
 set -e
 
@@ -8,22 +8,22 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v8 ===${NC}"
+echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer v10 ===${NC}"
 
 if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Пожалуйста, запустите скрипт с правами root (sudo).${NC}"
     exit 1
 fi
 
-# --- 1. Проверка интернета ---
+# Проверка интернета
 echo -e "${YELLOW}Проверка подключения к интернету...${NC}"
 if ! ping -c 1 8.8.8.8 &> /dev/null; then
-    echo -e "${RED}Нет интернета. Убедитесь, что сервер имеет доступ к сети.${NC}"
+    echo -e "${RED}Нет интернета.${NC}"
     exit 1
 fi
 echo -e "${GREEN}Интернет доступен.${NC}"
 
-# --- 2. Работа с .env ---
+# .env
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         cp .env.example .env
@@ -33,14 +33,14 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Запрос переменных (если уже есть, оставляем текущие)
+# Запрос переменных
 echo -e "${YELLOW}Настройка переменных окружения (оставьте пустым для сохранения текущих)${NC}"
 read -p "Введите TELEGRAM_BOT_TOKEN: " token
 read -p "Введите ADMIN_IDS (Telegram ID, через запятую): " admins
 read -p "Введите SERVER_PUBLIC_IP (автоопределение): " ip
 ip=${ip:-$(curl -s ifconfig.me)}
-read -p "Введите SERVER_PORT (по умолчанию 443): " port
-port=${port:-443}
+read -p "Введите SERVER_PORT (по умолчанию 587): " port
+port=${port:-587}
 read -p "Введите VPN_SUBNET (по умолчанию 10.9.9.): " subnet
 subnet=${subnet:-10.9.9.}
 
@@ -54,23 +54,20 @@ export SERVER_PUBLIC_IP=$ip
 export SERVER_PORT=$port
 export VPN_SUBNET=$subnet
 
-# --- 3. Установка базовых пакетов ---
-echo -e "${YELLOW}Установка базовых пакетов...${NC}"
+# Базовые пакеты
 apt update
 apt install -y python3 python3-pip python3-venv python3-full curl wget jq qrencode iptables-persistent net-tools git dnsutils
 
-# --- 4. Установка AmneziaWG (если отсутствует) ---
+# Установка AmneziaWG (если отсутствует)
 if [ ! -x /usr/bin/awg ]; then
     echo -e "${YELLOW}AmneziaWG не найден. Запуск автоматической установки...${NC}"
     mkdir -p scripts
     if [ ! -f "scripts/install_amneziawg.sh" ]; then
-        echo -e "${YELLOW}Скачивание установщика bivlked...${NC}"
         wget -O scripts/install_amneziawg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/v5.18.1/install_amneziawg.sh
         chmod +x scripts/install_amneziawg.sh
     fi
-    echo -e "${YELLOW}Запуск установщика с автоматическими ответами: порт 443, режим 2 (Amnezia+DNS)${NC}"
-    # Автоматически отвечаем на вопросы: порт 443, режим 2, согласие на перезагрузку (y)
-    echo -e "443\n2\ny" | sudo bash scripts/install_amneziawg.sh
+    # Автоматические ответы: порт 587, режим 2, согласие на перезагрузку
+    echo -e "587\n2\ny" | sudo bash scripts/install_amneziawg.sh
     echo -e "${YELLOW}Установка AmneziaWG завершена. Требуется перезагрузка.${NC}"
     echo -e "${YELLOW}После перезагрузки запустите скрипт снова: sudo ./install.sh${NC}"
     echo -e "${YELLOW}Перезагрузить сейчас? (y/N)${NC}"
@@ -84,17 +81,15 @@ else
     echo -e "${GREEN}AmneziaWG уже установлен (найден /usr/bin/awg).${NC}"
 fi
 
-# --- 5. Настройка бота (выполняется только если awg есть) ---
+# --- Настройка бота ---
 echo -e "${GREEN}Настройка бота и сервера...${NC}"
 
 # Создание папок
-mkdir -p /etc/amneziawg /root/amneziawg-clients /opt/amneziawg-bot/app /opt/amneziawg-bot/scripts
-
-# Глобальный файл ресурсов (заглушка)
-touch /etc/amneziawg/global_resources.txt 2>/dev/null || true
+mkdir -p /etc/amnezia/amneziawg /root/amneziawg-clients /opt/amneziawg-bot/app /opt/amneziawg-bot/scripts
 
 # Мета-файл клиентов
 if [ ! -f /etc/amneziawg/clients_meta.json ]; then
+    mkdir -p /etc/amneziawg
     echo '{}' | tee /etc/amneziawg/clients_meta.json > /dev/null
     chmod 644 /etc/amneziawg/clients_meta.json
 fi
@@ -112,20 +107,33 @@ source /opt/amneziawg-bot/venv/bin/activate
 pip install -r /opt/amneziawg-bot/requirements.txt
 deactivate
 
-# Конфиг сервера (если нет)
-if [ ! -f /etc/amneziawg/awg0.conf ]; then
+# Конфиг сервера (если нет) с правильной подсетью и портом
+if [ ! -f /etc/amnezia/amneziawg/awg0.conf ]; then
     SERVER_PRIV=$(/usr/bin/awg genkey)
-    cat > /etc/amneziawg/awg0.conf <<EOF
+    cat > /etc/amnezia/amneziawg/awg0.conf <<EOF
 [Interface]
 PrivateKey = $SERVER_PRIV
 Address = ${subnet}1/24
 ListenPort = $port
 MTU = 1280
+Jc = 4
+Jmin = 50
+Jmax = 150
+S1 = 60
+S2 = 35
+H1 = 1187483647
+H2 = 2187483647
+H3 = 3187483647
+H4 = 4187483647
+I1 = <r 15><b 0x12345678>
 EOF
     echo -e "${GREEN}Конфиг сервера создан.${NC}"
 else
     echo -e "${GREEN}Конфиг сервера уже существует.${NC}"
 fi
+
+# Симлинк для совместимости
+ln -sf /etc/amnezia/amneziawg/awg0.conf /etc/amneziawg/awg0.conf
 
 # Форвардинг
 sysctl -w net.ipv4.ip_forward=1
@@ -208,47 +216,14 @@ EOF
 systemctl enable awg-cleanup.timer
 systemctl start awg-cleanup.timer
 
-# --- 6. Автотестирование ---
+# Автотестирование
 echo -e "${YELLOW}Запуск автотестирования...${NC}"
+if ip link show awg0 &>/dev/null; then echo -e "${GREEN}✓ Интерфейс awg0 поднят.${NC}"; else echo -e "${RED}✗ Интерфейс awg0 не найден.${NC}"; fi
+if systemctl is-active --quiet awg-bot && systemctl is-active --quiet awg-api; then echo -e "${GREEN}✓ Сервисы активны.${NC}"; else echo -e "${RED}✗ Сервисы не активны.${NC}"; fi
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health | grep -q 200; then echo -e "${GREEN}✓ API отвечает.${NC}"; else echo -e "${RED}✗ API не отвечает.${NC}"; fi
+if [ -x /usr/local/bin/awg-manager ]; then echo -e "${GREEN}✓ awg-manager найден.${NC}"; else echo -e "${RED}✗ awg-manager отсутствует.${NC}"; fi
+if [ -f /etc/amneziawg/clients_meta.json ]; then echo -e "${GREEN}✓ Мета-файл существует.${NC}"; else echo -e "${RED}✗ Мета-файл отсутствует.${NC}"; fi
 
-# 6.1 Проверка интерфейса awg0
-if ip link show awg0 &>/dev/null; then
-    echo -e "${GREEN}✓ Интерфейс awg0 поднят.${NC}"
-else
-    echo -e "${RED}✗ Интерфейс awg0 не найден.${NC}"
-fi
-
-# 6.2 Проверка сервисов
-if systemctl is-active --quiet awg-bot && systemctl is-active --quiet awg-api; then
-    echo -e "${GREEN}✓ Сервисы awg-bot и awg-api активны.${NC}"
-else
-    echo -e "${RED}✗ Один из сервисов не запущен. Проверьте логи: journalctl -u awg-bot -f${NC}"
-fi
-
-# 6.3 Проверка API health
-if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health | grep -q 200; then
-    echo -e "${GREEN}✓ API отвечает на /health (200 OK).${NC}"
-else
-    echo -e "${RED}✗ API не отвечает. Проверьте логи: journalctl -u awg-api -f${NC}"
-fi
-
-# 6.4 Проверка, что awg-manager существует
-if [ -x /usr/local/bin/awg-manager ]; then
-    echo -e "${GREEN}✓ awg-manager найден и исполняемый.${NC}"
-else
-    echo -e "${RED}✗ awg-manager отсутствует или не исполняемый.${NC}"
-fi
-
-# 6.5 Проверка наличия мета-файла
-if [ -f /etc/amneziawg/clients_meta.json ]; then
-    echo -e "${GREEN}✓ Мета-файл клиентов существует.${NC}"
-else
-    echo -e "${RED}✗ Мета-файл клиентов отсутствует.${NC}"
-fi
-
-echo -e "${GREEN}=== Автотестирование завершено. ===${NC}"
-echo -e "${YELLOW}Если все проверки прошли успешно, бот готов к использованию в Telegram.${NC}"
-echo -e "${YELLOW}Откройте бота и отправьте /menu для проверки.${NC}"
-
-# --- 7. Финальное сообщение ---
-echo -e "${GREEN}Установка завершена! Бот запущен. Используйте /menu в Telegram.${NC}"
+echo -e "${GREEN}=== Установка завершена! ===${NC}"
+echo -e "Бот запущен. Используйте /menu в Telegram."
+echo -e "Порт: $port, подсеть: $subnet"
