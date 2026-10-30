@@ -1,34 +1,28 @@
 #!/bin/bash
-# Управление клиентами AmneziaWG (исправленная версия)
 set -e
 
 SERVER_CONF="/etc/amnezia/amneziawg/awg0.conf"
 META_FILE="/etc/amneziawg/clients_meta.json"
 CLIENTS_DIR="/root/amneziawg-clients"
+
+# АВТОМАТИЧЕСКОЕ ЧТЕНИЕ ПОРТА ИЗ КОНФИГА СЕРВЕРА
+SERVER_PORT=$(grep "^ListenPort" "$SERVER_CONF" | awk -F'= ' '{print $2}')
+SERVER_PORT=${SERVER_PORT:-443} # Если не найден, ставим 443 по умолчанию
+
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-"$(curl -s ifconfig.me)"}
-SERVER_PORT=${SERVER_PORT:-587}
 VPN_SUBNET=${VPN_SUBNET:-"10.9.9."}
 
-# Функция: читает параметры обфускации, НО исключает проблемные I1-I5 и S3/S4
 get_obfuscation_params() {
     local conf="$1"
     local in_interface=0
     local params=""
     while IFS= read -r line; do
-        if [[ "$line" =~ ^\[Interface\] ]]; then
-            in_interface=1
-            continue
-        fi
-        if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then
-            break
-        fi
+        if [[ "$line" =~ ^\[Interface\] ]]; then in_interface=1; continue; fi
+        if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then break; fi
         if [ $in_interface -eq 1 ]; then
-            # Исключаем серверные параметры и правила iptables
-            if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|#) ]]; then
+            if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|MTU|#) ]]; then
                 if [[ ! "$line" =~ ^(I[1-5]|S[34])[[:space:]]*= ]]; then
-                    if [ -n "$line" ]; then
-                        params="$params$line\n"
-                    fi
+                    if [ -n "$line" ]; then params="$params$line\n"; fi
                 fi
             fi
         fi
@@ -52,15 +46,14 @@ add_client() {
     local server_public_key=$(grep "^PrivateKey" "$SERVER_CONF" | awk '{print $3}' | awg pubkey)
     local client_ip="${VPN_SUBNET}${ip}"
 
-    # Добавляем пира в серверный конфиг С МАРКЕРАМИ (чтобы удаление работало)
-    cat >> "$SERVER_CONF" <<EOF
+    cat >> "$SERVER_CONF" <<EOT
 
 # BEGIN_PEER $name
 [Peer]
 PublicKey = $public_key
 AllowedIPs = $client_ip/32
 # END_PEER $name
-EOF
+EOT
 
     awg-quick down awg0 2>/dev/null || true
     awg-quick up awg0
@@ -68,11 +61,12 @@ EOF
     local obf_params=$(get_obfuscation_params "$SERVER_CONF")
     mkdir -p "$CLIENTS_DIR"
 
-    cat > "${CLIENTS_DIR}/${name}.conf" <<EOF
+    cat > "${CLIENTS_DIR}/${name}.conf" <<EOT
 [Interface]
 PrivateKey = $private_key
 Address = $client_ip/24
 DNS = 1.1.1.1, 8.8.8.8
+MTU = 1280
 $obf_params
 
 [Peer]
@@ -80,7 +74,7 @@ PublicKey = $server_public_key
 Endpoint = ${SERVER_PUBLIC_IP}:${SERVER_PORT}
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
-EOF
+EOT
 
     qrencode -t png -o "${CLIENTS_DIR}/${name}.png" < "${CLIENTS_DIR}/${name}.conf"
 
@@ -94,7 +88,7 @@ EOF
     else
         echo "{}" | jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' > "$META_FILE"
     fi
-    echo "Клиент $name добавлен. Конфиг: ${CLIENTS_DIR}/${name}.conf"
+    echo "Клиент $name добавлен. Порт: $SERVER_PORT."
 }
 
 del_client() {
