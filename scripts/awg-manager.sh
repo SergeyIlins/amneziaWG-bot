@@ -119,8 +119,9 @@ cleanup_expired() {
 
 case "$1" in
     add) [ -z "$2" ] && echo "Использование: $0 add <имя> [duration_seconds]" && exit 1; add_client "$2" "$3" ;;
+    add-temp) [ -z "$2" ] || [ -z "$3" ] && echo "Использование: $0 add-temp <имя> <seconds>" && exit 1; add_client "$2" "$3" ;;
     del) [ -z "$2" ] && echo "Использование: $0 del <имя>" && exit 1; del_client "$2" ;;
     list) list_clients ;;
     cleanup) cleanup_expired ;;
-    *) echo "Доступные: add, del, list, cleanup"; exit 1 ;;
+    *) echo "Доступные: add, add-temp, del, list, cleanup"; exit 1 ;;
 esac
