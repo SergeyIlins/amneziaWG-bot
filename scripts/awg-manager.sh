@@ -1,7 +1,7 @@
 #!/bin/bash
 # Управление клиентами AmneziaWG — копирует все параметры обфускации с сервера
-
 set -e
+
 SERVER_CONF="/etc/amnezia/amneziawg/awg0.conf"
 META_FILE="/etc/amneziawg/clients_meta.json"
 CLIENTS_DIR="/root/amneziawg-clients"
@@ -15,20 +15,15 @@ get_obfuscation_params() {
     local in_interface=0
     local params=""
     while IFS= read -r line; do
-        # Ищем начало секции [Interface]
         if [[ "$line" =~ ^\[Interface\] ]]; then
             in_interface=1
             continue
         fi
-        # Если встретили другую секцию — выходим
         if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then
             break
         fi
-        # Если внутри секции Interface
         if [ $in_interface -eq 1 ]; then
-            # Пропускаем строки с PrivateKey, Address, ListenPort
             if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort) ]]; then
-                # Добавляем непустые строки
                 if [ -n "$line" ]; then
                     params="$params$line\n"
                 fi
@@ -47,20 +42,28 @@ add_client() {
     local name=$1
     local duration=$2
     local ip=$(get_next_ip)
-    if [ "$ip" -ge 255 ]; then echo "Нет свободных IP" >&2; return 1; fi
+    if [ "$ip" -ge 255 ]; then
+        echo "Нет свободных IP" >&2
+        return 1
+    fi
+
     local private_key=$(awg genkey)
     local public_key=$(echo "$private_key" | awg pubkey)
     local server_public_key=$(grep "^PrivateKey" "$SERVER_CONF" | awk '{print $3}' | awg pubkey)
 
     # Добавляем пира в серверный конфиг
-    cat >> "$SERVER_CONF" <<EOF
+    local server_ip="${VPN_SUBNET}1"
+    local client_ip="${VPN_SUBNET}${ip}"
 
+    cat >> "$SERVER_CONF" << EOF
+
+# BEGIN_PEER $name
 [Peer]
 PublicKey = $public_key
-AllowedIPs = ${VPN_SUBNET}${ip}/32
+AllowedIPs = $client_ip/32
+# END_PEER $name
 EOF
 
-    # Перезапускаем интерфейс для применения изменений
     awg-quick down awg0 2>/dev/null || true
     awg-quick up awg0
 
@@ -68,28 +71,34 @@ EOF
     obf_params=$(get_obfuscation_params "$SERVER_CONF")
 
     mkdir -p "$CLIENTS_DIR"
-    cat > "${CLIENTS_DIR}/${name}.conf" <<EOF
+
+    cat > "${CLIENTS_DIR}/${name}.conf" << EOF
 [Interface]
 PrivateKey = $private_key
-Address = ${VPN_SUBNET}${ip}/32
-DNS = 8.8.8.8, 1.1.1.1
+Address = $client_ip/24
+DNS = 1.1.1.1, 8.8.8.8
 $obf_params
 
 [Peer]
 PublicKey = $server_public_key
-Endpoint = ${SERVER_PUBLIC_IP}:${SERVER_PORT}
+Endpoint = $SERVER_PUBLIC_IP:$SERVER_PORT
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 EOF
 
     qrencode -t png -o "${CLIENTS_DIR}/${name}.png" < "${CLIENTS_DIR}/${name}.conf"
+
     local expires=0
-    [ "$duration" -gt 0 ] && expires=$(date +%s -d "+$duration seconds")
-    if [ -f "$META_FILE" ]; then
+    if [ -n "$duration" ] && [ "$duration" -gt 0 ]; then
+        expires=$(( $(date +%s) + duration ))
+    fi
+
+    if [ -f "$META_FILE" ] && [ -s "$META_FILE" ]; then
         jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' "$META_FILE" > "${META_FILE}.tmp" && mv "${META_FILE}.tmp" "$META_FILE"
     else
         echo "{}" | jq --arg name "$name" --arg ip "$ip" --arg expires "$expires" '. + {($name): {"ip": $ip, "expires": $expires}}' > "$META_FILE"
     fi
+
     echo "Клиент $name добавлен. Конфиг: ${CLIENTS_DIR}/${name}.conf, QR: ${CLIENTS_DIR}/${name}.png"
 }
 
@@ -103,7 +112,9 @@ del_client() {
     echo "Клиент $name удалён."
 }
 
-list_clients() { [ -f "$META_FILE" ] && cat "$META_FILE" || echo "{}"; }
+list_clients() {
+    [ -f "$META_FILE" ] && cat "$META_FILE" || echo "{}"
+}
 
 cleanup_expired() {
     local current=$(date +%s)
@@ -114,10 +125,26 @@ cleanup_expired() {
 }
 
 case "$1" in
-    add) [ -z "$2" ] && echo "Использование: $0 add <имя> [duration_seconds]" && exit 1; add_client "$2" "$3" ;;
-    add-temp) [ -z "$2" ] || [ -z "$3" ] && echo "Использование: $0 add-temp <имя> <seconds>" && exit 1; add_client "$2" "$3" ;;
-    del) [ -z "$2" ] && echo "Использование: $0 del <имя>" && exit 1; del_client "$2" ;;
-    list) list_clients ;;
-    cleanup) cleanup_expired ;;
-    *) echo "Доступные: add, add-temp, del, list, cleanup"; exit 1 ;;
+    add)
+        [ -z "$2" ] && echo "Использование: $0 add <имя> [duration_seconds]" && exit 1
+        add_client "$2" "$3"
+        ;;
+    add-temp)
+        [ -z "$2" ] || [ -z "$3" ] && echo "Использование: $0 add-temp <имя> <duration_seconds>" && exit 1
+        add_client "$2" "$3"
+        ;;
+    del)
+        [ -z "$2" ] && echo "Использование: $0 del <имя>" && exit 1
+        del_client "$2"
+        ;;
+    list)
+        list_clients
+        ;;
+    cleanup)
+        cleanup_expired
+        ;;
+    *)
+        echo "Доступные: add, add-temp, del, list, cleanup"
+        exit 1
+        ;;
 esac
