@@ -183,7 +183,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/amneziawg-bot
 EnvironmentFile=/opt/amneziawg-bot/.env
-ExecStart=/opt/amneziawg-bot/venv/bin/python -m app.main
+ExecStart=/opt/amneziawg-bot/venv/bin/python -m app.bot
 Restart=always
 RestartSec=10
 
