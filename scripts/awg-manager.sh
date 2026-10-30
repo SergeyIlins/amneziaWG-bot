@@ -23,9 +23,8 @@ get_obfuscation_params() {
             break
         fi
         if [ $in_interface -eq 1 ]; then
-            # Пропускаем PrivateKey, Address, ListenPort
+            # Исключаем серверные параметры и правила iptables
             if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|#) ]]; then
-                # Исключаем параметры, которые ломают импорт на мобильных клиентах
                 if [[ ! "$line" =~ ^(I[1-5]|S[34])[[:space:]]*= ]]; then
                     if [ -n "$line" ]; then
                         params="$params$line\n"
