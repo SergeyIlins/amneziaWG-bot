@@ -32,7 +32,9 @@ get_obfuscation_params() {
 
 get_next_ip() {
     local last_ip=$(grep -oP "AllowedIPs = ${VPN_SUBNET}\K\d+" "$SERVER_CONF" | sort -n | tail -1)
-    echo ${last_ip:-2}
+    # Если last_ip пустой (клиентов нет), начинаем с 2.
+    # Если есть, прибавляем 1.
+    echo $(( ${last_ip:-1} + 1 ))
 }
 
 add_client() {
