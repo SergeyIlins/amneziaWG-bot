@@ -85,15 +85,15 @@ if [ ! -f /etc/amnezia/amneziawg/awg0.conf ]; then
   SERVER_PRIV=$(/usr/bin/awg genkey)
   
   # ФИКСИРОВАННЫЕ И БЫСТРЫЕ ПАРАМЕТРЫ ОБФУСКАЦИИ
-  JC=3
-  JMIN=40
-  JMAX=70
-  S1=0
-  S2=0
-  H1=456123
-  H2=789012
-  H3=345678
-  H4=123456
+  JC=120
+  JMIN=23
+  JMAX=911
+  S1=15
+  S2=45
+  H1=194857
+  H2=736251
+  H3=482910
+  H4=192837
   
   cat > /etc/amnezia/amneziawg/awg0.conf << EOF
 [Interface]
