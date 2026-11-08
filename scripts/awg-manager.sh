@@ -23,10 +23,6 @@ get_obfuscation_params() {
             if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|MTU|#) ]]; then
                 if [ -n "$line" ]; then 
                     # Если H1-H4 равны 1,2,3,4 (баг установщика), меняем их на нормальные
-                    if [[ "$line" =~ ^H1[[:space:]]*=[[:space:]]*1$ ]]; then line="H1 = 194857"; fi
-                    if [[ "$line" =~ ^H2[[:space:]]*=[[:space:]]*2$ ]]; then line="H2 = 736251"; fi
-                    if [[ "$line" =~ ^H3[[:space:]]*=[[:space:]]*3$ ]]; then line="H3 = 482910"; fi
-                    if [[ "$line" =~ ^H4[[:space:]]*=[[:space:]]*4$ ]]; then line="H4 = 192837"; fi
                     params="$params$line\n"; 
                 fi
             fi
