@@ -7,7 +7,7 @@ CLIENTS_DIR="/root/amneziawg-clients"
 
 # АВТОМАТИЧЕСКОЕ ЧТЕНИЕ ПОРТА ИЗ КОНФИГА СЕРВЕРА
 SERVER_PORT=$(grep "^ListenPort" "$SERVER_CONF" | awk -F'= ' '{print $2}')
-SERVER_PORT=${SERVER_PORT:-443} # Если не найден, ставим 443 по умолчанию
+SERVER_PORT=${SERVER_PORT:-443}
 
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-"$(curl -s ifconfig.me)"}
 VPN_SUBNET=${VPN_SUBNET:-"10.9.9."}
@@ -20,18 +20,15 @@ get_obfuscation_params() {
         if [[ "$line" =~ ^\[Interface\] ]]; then in_interface=1; continue; fi
         if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then break; fi
         if [ $in_interface -eq 1 ]; then
-            # Исключаем серверные параметры. S3 и S4 ОСТАВЛЯЕМ, так как они нужны в 3.1!
+            # Исключаем только служебные параметры сервера (I1 теперь копируем!)
             if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|MTU|#) ]]; then
-                # Исключаем I1-I5 (они ломают Android), но оставляем всё остальное
-                if [[ ! "$line" =~ ^I[1-5][[:space:]]*= ]]; then
-                    if [ -n "$line" ]; then 
-                        # Если H1-H4 равны 1,2,3,4 (баг установщика), меняем их на нормальные
-                        if [[ "$line" =~ ^H1[[:space:]]*=[[:space:]]*1$ ]]; then line="H1 = 194857"; fi
-                        if [[ "$line" =~ ^H2[[:space:]]*=[[:space:]]*2$ ]]; then line="H2 = 736251"; fi
-                        if [[ "$line" =~ ^H3[[:space:]]*=[[:space:]]*3$ ]]; then line="H3 = 482910"; fi
-                        if [[ "$line" =~ ^H4[[:space:]]*=[[:space:]]*4$ ]]; then line="H4 = 192837"; fi
-                        params="$params$line\n"; 
-                    fi
+                if [ -n "$line" ]; then 
+                    # Если H1-H4 равны 1,2,3,4 (баг установщика), меняем их на нормальные
+                    if [[ "$line" =~ ^H1[[:space:]]*=[[:space:]]*1$ ]]; then line="H1 = 194857"; fi
+                    if [[ "$line" =~ ^H2[[:space:]]*=[[:space:]]*2$ ]]; then line="H2 = 736251"; fi
+                    if [[ "$line" =~ ^H3[[:space:]]*=[[:space:]]*3$ ]]; then line="H3 = 482910"; fi
+                    if [[ "$line" =~ ^H4[[:space:]]*=[[:space:]]*4$ ]]; then line="H4 = 192837"; fi
+                    params="$params$line\n"; 
                 fi
             fi
         fi
