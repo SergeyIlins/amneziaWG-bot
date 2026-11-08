@@ -5,7 +5,6 @@ SERVER_CONF="/etc/amnezia/amneziawg/awg0.conf"
 META_FILE="/etc/amneziawg/clients_meta.json"
 CLIENTS_DIR="/root/amneziawg-clients"
 
-# АВТОМАТИЧЕСКОЕ ЧТЕНИЕ ПОРТА ИЗ КОНФИГА СЕРВЕРА
 SERVER_PORT=$(grep "^ListenPort" "$SERVER_CONF" | awk -F'= ' '{print $2}')
 SERVER_PORT=${SERVER_PORT:-443}
 
