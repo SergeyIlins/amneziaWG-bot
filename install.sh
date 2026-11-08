@@ -6,7 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${GREEN}=== AmneziaWG + Telegram Bot Installer (Fixed) ===${NC}"
+echo -e "${GREEN}=== AmneziaWG 3.1 + Telegram Bot Installer ===${NC}"
 
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Пожалуйста, запустите скрипт с правами root (sudo).${NC}"
@@ -42,16 +42,19 @@ export SERVER_PUBLIC_IP=$ip
 export SERVER_PORT=$port
 export VPN_SUBNET=$subnet
 
-apt install -y python3 python3-pip python3-venv python3-full iptables-persistent net-tools dnsutils qrencode
+# Убран iptables-persistent, так как в Ubuntu 24.04 он вызывает ошибку
+apt install -y python3 python3-pip python3-venv python3-full net-tools dnsutils qrencode
 
 if [ ! -x /usr/bin/awg ]; then
-  echo -e "${YELLOW}AmneziaWG не найден. Запуск автоматической установки...${NC}"
+  echo -e "${YELLOW}AmneziaWG не найден. Запуск автоматической установки версии 3.1...${NC}"
   mkdir -p scripts
-  if [ ! -f "scripts/install_amneziawg.sh" ]; then
-    wget -O scripts/install_amneziawg.sh https://raw.githubusercontent.com/bivlked/amneziawg-installer/v5.18.1/install_amneziawg.sh
-    chmod +x scripts/install_amneziawg.sh
-  fi
+  # Скачиваем актуальную версию установщика
+  wget -O scripts/install_amneziawg.sh https://github.com/bivlked/amneziawg-installer/releases/latest/download/install_amneziawg.sh
+  chmod +x scripts/install_amneziawg.sh
+  
+  # Передаем ответы: порт, режим (2 - AmneziaWG), перезагрузка (y)
   echo -e "${port}\n2\ny" | sudo bash scripts/install_amneziawg.sh
+  
   echo -e "${YELLOW}Установка AmneziaWG завершена. Требуется перезагрузка.${NC}"
   echo -e "${YELLOW}Перезагрузить сейчас? (y/N)${NC}"
   read -r reboot_now
@@ -60,6 +63,8 @@ if [ ! -x /usr/bin/awg ]; then
   else
     exit 0
   fi
+else
+  echo -e "${GREEN}AmneziaWG уже установлен (найден /usr/bin/awg).${NC}"
 fi
 
 mkdir -p /etc/amnezia/amneziawg /root/amneziawg-clients /opt/amneziawg-bot/app /opt/amneziawg-bot/scripts
@@ -81,40 +86,7 @@ source /opt/amneziawg-bot/venv/bin/activate
 pip install -r /opt/amneziawg-bot/requirements.txt
 deactivate
 
-if [ ! -f /etc/amnezia/amneziawg/awg0.conf ]; then
-  SERVER_PRIV=$(/usr/bin/awg genkey)
-  
-  # ФИКСИРОВАННЫЕ И БЫСТРЫЕ ПАРАМЕТРЫ ОБФУСКАЦИИ
-  JC=120
-  JMIN=23
-  JMAX=911
-  S1=15
-  S2=45
-  H1=194857
-  H2=736251
-  H3=482910
-  H4=192837
-  
-  cat > /etc/amnezia/amneziawg/awg0.conf << EOF
-[Interface]
-PrivateKey = ${SERVER_PRIV}
-Address = ${VPN_SUBNET}1/24
-ListenPort = ${SERVER_PORT}
-Jc = ${JC}
-Jmin = ${JMIN}
-Jmax = ${JMAX}
-S1 = ${S1}
-S2 = ${S2}
-H1 = ${H1}
-H2 = ${H2}
-H3 = ${H3}
-H4 = ${H4}
-MTU = 1280
-PostUp = iptables -A FORWARD -i awg0 -j ACCEPT; iptables -A FORWARD -o awg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-PostDown = iptables -D FORWARD -i awg0 -j ACCEPT; iptables -D FORWARD -o awg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-EOF
-fi
-
+# Создание симлинка (установщик 3.1 сам создает конфиг, мы его не перезаписываем!)
 ln -sf /etc/amnezia/amneziawg/awg0.conf /etc/amneziawg/awg0.conf
 
 sysctl -w net.ipv4.ip_forward=1
@@ -125,7 +97,6 @@ if [ -n "$DEFAULT_IF" ]; then
   iptables -t nat -A POSTROUTING -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || true
   iptables -A FORWARD -i awg0 -j ACCEPT 2>/dev/null || true
   iptables -A FORWARD -o awg0 -j ACCEPT 2>/dev/null || true
-  iptables-save > /etc/iptables/rules.v4
 fi
 
 if command -v ufw &> /dev/null; then
@@ -133,7 +104,7 @@ if command -v ufw &> /dev/null; then
 fi
 
 if ! ip link show awg0 &>/dev/null; then
-  /usr/bin/awg-quick up awg0
+  /usr/bin/awg-quick up awg0 || true
 fi
 
 cat > /etc/systemd/system/awg-bot.service << 'EOF'
