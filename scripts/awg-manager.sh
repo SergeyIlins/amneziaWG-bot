@@ -20,9 +20,18 @@ get_obfuscation_params() {
         if [[ "$line" =~ ^\[Interface\] ]]; then in_interface=1; continue; fi
         if [[ "$line" =~ ^\[ ]] && [ $in_interface -eq 1 ]; then break; fi
         if [ $in_interface -eq 1 ]; then
+            # Исключаем серверные параметры. S3 и S4 ОСТАВЛЯЕМ, так как они нужны в 3.1!
             if [[ ! "$line" =~ ^(PrivateKey|Address|ListenPort|PostUp|PostDown|MTU|#) ]]; then
-                if [[ ! "$line" =~ ^(I[1-5]|S[34])[[:space:]]*= ]]; then
-                    if [ -n "$line" ]; then params="$params$line\n"; fi
+                # Исключаем I1-I5 (они ломают Android), но оставляем всё остальное
+                if [[ ! "$line" =~ ^I[1-5][[:space:]]*= ]]; then
+                    if [ -n "$line" ]; then 
+                        # Если H1-H4 равны 1,2,3,4 (баг установщика), меняем их на нормальные
+                        if [[ "$line" =~ ^H1[[:space:]]*=[[:space:]]*1$ ]]; then line="H1 = 194857"; fi
+                        if [[ "$line" =~ ^H2[[:space:]]*=[[:space:]]*2$ ]]; then line="H2 = 736251"; fi
+                        if [[ "$line" =~ ^H3[[:space:]]*=[[:space:]]*3$ ]]; then line="H3 = 482910"; fi
+                        if [[ "$line" =~ ^H4[[:space:]]*=[[:space:]]*4$ ]]; then line="H4 = 192837"; fi
+                        params="$params$line\n"; 
+                    fi
                 fi
             fi
         fi
@@ -32,8 +41,6 @@ get_obfuscation_params() {
 
 get_next_ip() {
     local last_ip=$(grep -oP "AllowedIPs = ${VPN_SUBNET}\K\d+" "$SERVER_CONF" | sort -n | tail -1)
-    # Если last_ip пустой (клиентов нет), начинаем с 2.
-    # Если есть, прибавляем 1.
     echo $(( ${last_ip:-1} + 1 ))
 }
 
